@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Politie Academie - Interactieve PV Zinsbouwer</title>
+    <style>
+        :root { --pol-blauw: #003082; --pol-goud: #ffcc00; --pol-rood: #d32f2f; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #ececec; margin: 0; padding: 20px; }
+        .container { max-width: 1450px; margin: auto; background: #1e1e1e; padding: 25px; border-radius: 12px; border: 1px solid #333; }
+        
+        /* Bouwzone */
+        .construction-zone { 
+            background: #252526; padding: 30px; border-radius: 8px; border: 2px dashed var(--pol-goud); 
+            margin-bottom: 20px; min-height: 80px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        }
+        .construction-zone h3 { width: 100%; margin: 0 0 15px 0; color: var(--pol-goud); font-size: 0.9em; text-transform: uppercase; }
+
+        /* Knoppenbalk */
+        .action-bar { margin-bottom: 30px; display: flex; gap: 10px; align-items: center; }
+
+        /* Magazijn met collecties */
+        .warehouse { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
+        .collection { background: #2d2d2d; padding: 10px; border-radius: 8px; border-top: 4px solid var(--pol-blauw); height: 550px; overflow-y: auto; }
+        .collection h4 { font-size: 0.8em; text-align: center; color: #aaa; margin-bottom: 10px; height: 35px; border-bottom: 1px solid #444; }
+
+        .dragable { 
+            background: #333; border: 1px solid #555; padding: 8px; margin-bottom: 6px; 
+            border-radius: 4px; cursor: grab; font-size: 0.85em; transition: 0.2s; text-align: center;
+        }
+        .dragable:hover { background: #444; border-color: var(--pol-goud); }
+        .dragable:active { cursor: grabbing; }
+
+        .built-item { 
+            background: var(--pol-blauw); color: white; padding: 8px 15px; border-radius: 4px; 
+            font-weight: bold; cursor: pointer; animation: pop 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        @keyframes pop { from { transform: scale(0.8); } to { transform: scale(1); } }
+
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; text-transform: uppercase; color: white; }
+        .btn-reset { background: var(--pol-rood); }
+        .btn-tts { background: #444; }
+        .btn-save { background: #2e7d32; }
+
+        .step { display: none; } .active { display: block; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="step0" class="step active" style="text-align: center; max-width: 500px; margin: 100px auto;">
+        <h1 style="color:var(--pol-blauw)">PV Zinsbouwer v2.0</h1>
+        <p>Log in om de oefening te starten.</p>
+        <input type="text" id="naam" placeholder="Jouw Naam" style="padding:15px; width:100%; margin-bottom:20px; border-radius:4px; border:none; background:#eee;">
+        <button class="btn btn-save" style="width:100%;" onclick="startDienst()">Start Systeem</button>
+    </div>
+
+    <div id="step1" class="step">
+        <div class="construction-zone" id="drop_zone" ondragover="allowDrop(event)" ondrop="drop(event)">
+            <h3>Geconstrueerde PV-Zin:</h3>
+            </div>
+
+        <div class="action-bar">
+            <button class="btn btn-tts" onclick="speakSentence()">🔊 Voorlezen</button>
+            <button class="btn btn-reset" onclick="resetSentence()">🗑 Wissen</button>
+            <button class="btn btn-save" onclick="saveToFirebase()">💾 Opslaan in DB</button>
+            <span id="status_msg" style="color:var(--pol-goud); font-size: 0.9em; margin-left: 10px;"></span>
+        </div>
+
+        <div class="warehouse" id="magazijn"></div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
+    import { getDatabase, ref, push, set } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyA3_rzoZOWytlyAbYKKe_WuFlD8z2WvbX4",
+        authDomain: "aangifteq2les1.firebaseapp.com",
+        databaseURL: "https://aangifteq2les1-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "aangifteq2les1",
+        storageBucket: "aangifteq2les1.firebasestorage.app",
+        messagingSenderId: "1071661084879",
+        appId: "1:1071661084879:web:ec81dfed806ad75a8847ba"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    let u_naam = "";
+
+    const data = {
+        "Onderwerpen": ["De vrouw", "Ik", "Mijn collega", "De verdachte", "Een omstander", "De bewoonster", "Het broodmes", "De surveillance-eenheid", "Wij", "De getuige", "De persoon", "Een onbekende man", "De verbalisanten", "Het voertuig", "De hond"],
+        "Persoonsvormen": ["heeft", "heb", "is", "werd", "hadden", "waren", "ben", "zijn", "werd", "hebt", "had", "was", "wordt", "zult", "moest"],
+        "Gezegdes (Voltooid)": ["geschreeuwd", "gehanteerd", "gedreigd", "aangehouden", "gelopen", "geroepen", "gestoken", "gevallen", "gehoord", "gevlucht", "vastgehouden", "geconfronteerd", "afgevoerd", "verklaard", "gesommeerd"],
+        "Lijdende Voorwerpen": ["een groot broodmes", "doodsbedreigingen", "de woning", "een sommatie", "het wapen", "de agent", "de badjas", "een stekende beweging", "de instructies", "het bevel", "de deuropening", "een scherp voorwerp", "de verdachte", "het proces-verbaal", "de situatie"],
+        "Meewerkende Voorwerpen": ["aan de agent", "voor de bewoonster", "tegen de collega", "richting mij", "aan de verdachte", "voor het slachtoffer", "tegen de omstanders", "aan de meldkamer", "richting de woning", "voor de officier", "tegen de hond", "aan de hulpofficier", "voor zichzelf", "tegen de vrouw", "aan de getuigen"],
+        "Bijwoordelijke Bepalingen": ["op de straat", "om 14:22 uur", "met luide stem", "ter plaatse", "in de Dorpsstraat", "met een mes", "onmiddellijk", "tijdens de dienst", "van een afstand", "in de rechterhand", "op pantoffels", "met stekende bewegingen", "naar buiten", "zonder aarzeling", "in de badjas"]
+    };
+
+    window.startDienst = () => {
+        u_naam = document.getElementById('naam').value.trim();
+        if(!u_naam) return alert("Naam verplicht.");
+        document.getElementById('step0').classList.remove('active');
+        document.getElementById('step1').classList.add('active');
+        buildWarehouse();
+    };
+
+    function buildWarehouse() {
+        const wh = document.getElementById('magazijn');
+        for (let cat in data) {
+            let col = document.createElement('div');
+            col.className = 'collection';
+            col.innerHTML = `<h4>${cat}</h4>`;
+            data[cat].forEach(text => {
+                let item = document.createElement('div');
+                item.className = 'dragable';
+                item.draggable = true;
+                item.innerText = text;
+                item.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text', e.target.innerText);
+                });
+                col.appendChild(item);
+            });
+            wh.appendChild(col);
+        }
+    }
+
+    window.allowDrop = (e) => e.preventDefault();
+
+    window.drop = (e) => {
+        e.preventDefault();
+        const text = e.dataTransfer.getData('text');
+        const span = document.createElement('span');
+        span.className = 'built-item';
+        span.innerText = text;
+        span.onclick = function() { this.remove(); };
+        document.getElementById('drop_zone').appendChild(span);
+    };
+
+    window.resetSentence = () => {
+        document.getElementById('drop_zone').querySelectorAll('.built-item').forEach(i => i.remove());
+    };
+
+    window.speakSentence = () => {
+        const words = Array.from(document.querySelectorAll('.built-item')).map(i => i.innerText).join(" ");
+        if(!words) return;
+        const msg = new SpeechSynthesisUtterance(words);
+        msg.lang = 'nl-NL';
+        window.speechSynthesis.speak(msg);
+    };
+
+    window.saveToFirebase = () => {
+        const zin = Array.from(document.querySelectorAll('.built-item')).map(i => i.innerText).join(" ");
+        if(!zin) return alert("Bouw eerst een zin.");
+        push(ref(db, `constructies/${u_naam}`), {
+            zin: zin,
+            timestamp: Date.now()
+        }).then(() => {
+            document.getElementById('status_msg').innerText = "✅ Opgeslagen!";
+            setTimeout(() => { document.getElementById('status_msg').innerText = ""; }, 2000);
+        });
+    };
+</script>
+</body>
+</html>
